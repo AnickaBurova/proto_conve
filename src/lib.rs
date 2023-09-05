@@ -1,75 +1,7 @@
 //! These are convenient traits to convert the proto values in to the appropriate rust values
+//! To be able to implement them for custom types in the project, they have to be defined in your project,
+//! so use the macro
 
-/// Unwrap the value from the optional proto value, if the value is missing, an error is returned and
-/// convert it in to result if appropriate.
-trait Required {
-    /// The result of this type
-    type Result;
-    /// Convert the value from proto buf option in to Result, if the value is missing (None) the
-    /// error is returned
-    fn required(self) -> anyhow::Result<Self::Result>;
-}
-
-/// Implementation of the required for all the options.
-impl<T> Required for Option<T> {
-    type Result = T;
-
-    fn required(self) -> anyhow::Result<Self::Result> {
-        if let Some(value) = self {
-            Ok(value)
-        } else {
-            anyhow::bail!("Required is missing");
-        }
-    }
-}
-
-/// Convert the value in to appropriate proto value
-pub trait ToProto {
-    /// The proto value type
-    type Result;
-
-    /// Convert the value in to proto value
-    fn to_proto(&self) -> Self::Result;
-
-    /// Convert the value in to proto value and wrap it in to option
-    fn to_proto_option(&self) -> Option<Self::Result> {
-        Some(self.to_proto())
-    }
-}
-
-/// Convert the value in to proto value
-pub trait ToProtoAlias<T> {
-    fn to_proto(&self) -> T;
-
-    fn to_proto_option(&self) -> Option<T> {
-        Some(self.to_proto())
-    }
-}
-
-/// Convert the value in to proto value wrapped in an option
-pub trait ToProtoOption<T> {
-    fn to_proto(&self) -> Option<T>;
-}
-
-/// Convert the proto value in to the appropriate value
-pub trait FromProto {
-    type Result;
-    fn from_proto(self) -> anyhow::Result<Self::Result>;
-}
-
-impl<T: FromProto> FromProto for Option<T> {
-    type Result = Option<T::Result>;
-
-    fn from_proto(self) -> anyhow::Result<Self::Result> {
-        self.map(|v| v.from_proto()).transpose()
-    }
-}
-
-impl ToProtoAlias<bool> for bool {
-    fn to_proto(&self) -> bool {
-        *self
-    }
-}
 /// Implement FromProto and ToProto to some specific chrono types when the proto type has a specific format.
 /// ```proto
 /// // Duration specified in seconds and nanoseconds
@@ -85,6 +17,107 @@ impl ToProtoAlias<bool> for bool {
 /// ```
 #[macro_export]
 macro_rules! impl_traits {
+    (prelude) => {
+        /// Unwrap the value from the optional proto value, if the value is missing, an error is returned and
+        /// convert it in to result if appropriate.
+        trait Required {
+            /// The result of this type
+            type Result;
+            /// Convert the value from proto buf option in to Result, if the value is missing (None) the
+            /// error is returned
+            fn required(self) -> anyhow::Result<Self::Result>;
+        }
+
+        /// Implementation of the required for all the options.
+        impl<T> Required for Option<T> {
+            type Result = T;
+
+            fn required(self) -> anyhow::Result<Self::Result> {
+                if let Some(value) = self {
+                    Ok(value)
+                } else {
+                    anyhow::bail!("Required is missing");
+                }
+            }
+        }
+
+        /// Convert the value in to appropriate proto value
+        pub trait ToProto {
+            /// The proto value type
+            type Result;
+
+            /// Convert the value in to proto value
+            fn to_proto(&self) -> Self::Result;
+
+            /// Convert the value in to proto value and wrap it in to option
+            fn to_proto_option(&self) -> Option<Self::Result> {
+                Some(self.to_proto())
+            }
+        }
+
+        /// Convert the value in to proto value
+        pub trait ToProtoAlias<T> {
+            fn to_proto(&self) -> T;
+
+            fn to_proto_option(&self) -> Option<T> {
+                Some(self.to_proto())
+            }
+        }
+
+        /// Convert the value in to proto value wrapped in an option
+        pub trait ToProtoOption<T> {
+            fn to_proto(&self) -> Option<T>;
+        }
+
+        /// Convert the proto value in to the appropriate value
+        pub trait FromProto {
+            type Result;
+            fn from_proto(self) -> anyhow::Result<Self::Result>;
+        }
+
+        impl<T: FromProto> FromProto for Option<T> {
+            type Result = Option<T::Result>;
+
+            fn from_proto(self) -> anyhow::Result<Self::Result> {
+                self.map(|v| v.from_proto()).transpose()
+            }
+        }
+
+        impl ToProtoAlias<bool> for bool {
+            fn to_proto(&self) -> bool {
+                *self
+            }
+        }
+        /// Convert list of proto elements in a vector
+        impl<T: FromProto> FromProto for Vec<T> {
+            type Result = Vec<T::Result>;
+
+            fn from_proto(self) -> anyhow::Result<Self::Result> {
+                let mut result = Vec::new();
+                for item in self.into_iter() {
+                    result.push(item.from_proto()?);
+                }
+                Ok(result)
+            }
+        }
+
+        /// Convert list of elements in vector to proto list
+        impl<T: ToProto> ToProto for Vec<T> {
+            type Result = Vec<T::Result>;
+
+            fn to_proto(&self) -> Self::Result {
+                self.iter().map(|v| v.to_proto()).collect()
+            }
+        }
+
+        impl<T: ToProto> ToProto for Option<T> {
+            type Result = Option<T::Result>;
+
+            fn to_proto(&self) -> Self::Result {
+                self.as_ref().map(|v| v.to_proto())
+            }
+        }
+    };
     ($type: ident, chrono::Duration) => {
         impl FromProto for $type {
             type Result = chrono::Duration;
@@ -149,35 +182,6 @@ macro_rules! impl_traits {
 }
 
 
-/// Convert list of proto elements in a vector
-impl<T: FromProto> FromProto for Vec<T> {
-    type Result = Vec<T::Result>;
-
-    fn from_proto(self) -> anyhow::Result<Self::Result> {
-        let mut result = Vec::new();
-        for item in self.into_iter() {
-            result.push(item.from_proto()?);
-        }
-        Ok(result)
-    }
-}
-
-/// Convert list of elements in vector to proto list
-impl<T: ToProto> ToProto for Vec<T> {
-    type Result = Vec<T::Result>;
-
-    fn to_proto(&self) -> Self::Result {
-        self.iter().map(|v| v.to_proto()).collect()
-    }
-}
-
-impl<T: ToProto> ToProto for Option<T> {
-    type Result = Option<T::Result>;
-
-    fn to_proto(&self) -> Self::Result {
-        self.as_ref().map(|v| v.to_proto())
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -195,6 +199,7 @@ mod tests {
         nanos: u32,
     }
 
+    impl_traits!(prelude);
     impl_traits! (ProtoDuration, chrono::Duration);
     impl_traits! (ProtoDateTimeUtc, chrono::DateTime<chrono::Utc>);
 
